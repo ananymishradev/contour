@@ -7,6 +7,9 @@
 | contour_dagrebuild_timestamp | [GAUGE](https://prometheus.io/docs/concepts/metric_types/#gauge) |  | Timestamp of the last DAG rebuild. |
 | contour_dagrebuild_total | [COUNTER](https://prometheus.io/docs/concepts/metric_types/#counter) |  | Total number of times DAG has been rebuilt since startup |
 | contour_eventhandler_operation_total | [COUNTER](https://prometheus.io/docs/concepts/metric_types/#counter) | kind, op | Total number of Kubernetes object changes Contour has received by operation and object kind. |
+| contour_healthz_failure_total | [COUNTER](https://prometheus.io/docs/concepts/metric_types/#counter) |  | Total number of unsuccessful responses from the /healthz endpoint. |
+| contour_healthz_requests_total | [COUNTER](https://prometheus.io/docs/concepts/metric_types/#counter) |  | Total number of requests to the /healthz endpoint. |
+| contour_healthz_success_total | [COUNTER](https://prometheus.io/docs/concepts/metric_types/#counter) |  | Total number of successful responses from the /healthz endpoint. |
 | contour_httpproxy | [GAUGE](https://prometheus.io/docs/concepts/metric_types/#gauge) | namespace | Total number of HTTPProxies that exist regardless of status. |
 | contour_httpproxy_invalid | [GAUGE](https://prometheus.io/docs/concepts/metric_types/#gauge) | namespace, vhost | Total number of invalid HTTPProxies. |
 | contour_httpproxy_orphaned | [GAUGE](https://prometheus.io/docs/concepts/metric_types/#gauge) | namespace | Total number of orphaned HTTPProxies which have no root delegating to them. |

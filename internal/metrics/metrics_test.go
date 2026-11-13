@@ -28,6 +28,25 @@ type testMetric struct {
 	want   []*io_prometheus_client.Metric
 }
 
+func TestHealthzMetrics(t *testing.T) {
+	m := NewMetrics(prometheus.NewRegistry())
+
+	m.IncHealthzRequests()
+	m.IncHealthzRequests()
+	m.IncHealthzSuccess()
+	m.IncHealthzFailure()
+
+	readCounter := func(c prometheus.Counter) float64 {
+		metric := &io_prometheus_client.Metric{}
+		c.Write(metric)
+		return metric.GetCounter().GetValue()
+	}
+
+	assert.Equal(t, float64(2), readCounter(m.healthzRequestsTotal))
+	assert.Equal(t, float64(1), readCounter(m.healthzSuccessTotal))
+	assert.Equal(t, float64(1), readCounter(m.healthzFailureTotal))
+}
+
 func TestSetDAGLastRebuilt(t *testing.T) {
 	tests := map[string]struct {
 		timestampMetric testMetric
