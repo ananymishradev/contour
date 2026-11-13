@@ -21,15 +21,34 @@ import (
 	"k8s.io/client-go/kubernetes"
 )
 
-// Handler returns a http Handler for a health endpoint.
-func Handler(client *kubernetes.Clientset) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+// HealthzMetrics records request statistics for the /healthz endpoint.
+type HealthzMetrics interface {
+	IncHealthzRequests()
+	IncHealthzSuccess()
+	IncHealthzFailure()
+}
+
+// Handler returns a http Handler for a health endpoint. Requests to /healthz
+// are recorded in m; requests to /health are not.
+func Handler(client kubernetes.Interface, m HealthzMetrics) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		record := r.URL.Path == "/healthz"
+		if record {
+			m.IncHealthzRequests()
+		}
+
 		// Try and lookup Kubernetes server version as a quick and dirty check
-		_, err := client.ServerVersion()
+		_, err := client.Discovery().ServerVersion()
 		if err != nil {
+			if record {
+				m.IncHealthzFailure()
+			}
 			msg := fmt.Sprintf("Failed Kubernetes Check: %v", err)
 			http.Error(w, msg, http.StatusServiceUnavailable)
 			return
+		}
+		if record {
+			m.IncHealthzSuccess()
 		}
 		w.WriteHeader(http.StatusOK)
 		fmt.Fprintln(w, "OK")

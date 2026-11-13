@@ -47,6 +47,9 @@ type Metrics struct {
 	statusUpdateConflict        *prometheus.CounterVec
 	statusUpdateNoop            *prometheus.CounterVec
 	statusUpdateDurationSeconds *prometheus.SummaryVec
+	healthzRequestsTotal        prometheus.Counter
+	healthzSuccessTotal         prometheus.Counter
+	healthzFailureTotal         prometheus.Counter
 
 	// Keep a local cache of metrics for comparison on updates
 	proxyMetricCache *RouteMetric
@@ -88,6 +91,9 @@ const (
 	statusUpdateConflict        = "contour_status_update_conflict_total"
 	statusUpdateNoop            = "contour_status_update_noop_total"
 	statusUpdateDurationSeconds = "contour_status_update_duration_seconds"
+	HealthzRequestsTotal        = "contour_healthz_requests_total"
+	HealthzSuccessTotal         = "contour_healthz_success_total"
+	HealthzFailureTotal         = "contour_healthz_failure_total"
 )
 
 // NewMetrics creates a new set of metrics and registers them with
@@ -240,6 +246,18 @@ func NewMetrics(registry *prometheus.Registry) *Metrics {
 			},
 			[]string{"kind", "error"},
 		),
+		healthzRequestsTotal: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: HealthzRequestsTotal,
+			Help: "Total number of requests to the /healthz endpoint.",
+		}),
+		healthzSuccessTotal: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: HealthzSuccessTotal,
+			Help: "Total number of successful responses from the /healthz endpoint.",
+		}),
+		healthzFailureTotal: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: HealthzFailureTotal,
+			Help: "Total number of unsuccessful responses from the /healthz endpoint.",
+		}),
 	}
 	m.buildInfoGauge.WithLabelValues(build.Branch, build.Sha, build.Version).Set(1)
 	m.register(registry)
@@ -267,6 +285,9 @@ func (m *Metrics) register(registry *prometheus.Registry) {
 		m.statusUpdateConflict,
 		m.statusUpdateNoop,
 		m.statusUpdateDurationSeconds,
+		m.healthzRequestsTotal,
+		m.healthzSuccessTotal,
+		m.healthzFailureTotal,
 	)
 }
 
@@ -300,6 +321,9 @@ func (m *Metrics) Zero() {
 
 	m.CacheHandlerOnUpdateSummary.Observe(0)
 	m.DAGRebuildSeconds.Observe(0)
+	m.healthzRequestsTotal.Add(0)
+	m.healthzSuccessTotal.Add(0)
+	m.healthzFailureTotal.Add(0)
 }
 
 // SetDAGLastRebuilt records the last time the DAG was rebuilt.
@@ -396,6 +420,21 @@ func (m *Metrics) SetStatusUpdateDuration(duration time.Duration, kind string, o
 		labels["error"] = "true"
 	}
 	m.statusUpdateDurationSeconds.With(labels).Observe(duration.Seconds())
+}
+
+// IncHealthzRequests records a request to the /healthz endpoint.
+func (m *Metrics) IncHealthzRequests() {
+	m.healthzRequestsTotal.Inc()
+}
+
+// IncHealthzSuccess records a successful /healthz response.
+func (m *Metrics) IncHealthzSuccess() {
+	m.healthzSuccessTotal.Inc()
+}
+
+// IncHealthzFailure records an unsuccessful /healthz response.
+func (m *Metrics) IncHealthzFailure() {
+	m.healthzFailureTotal.Inc()
 }
 
 // Handler returns a http Handler for a metrics endpoint.
