@@ -32,6 +32,7 @@ import (
 	contour_v1 "github.com/projectcontour/contour/apis/projectcontour/v1"
 	contour_v1alpha1 "github.com/projectcontour/contour/apis/projectcontour/v1alpha1"
 	"github.com/projectcontour/contour/internal/annotation"
+	"github.com/projectcontour/contour/internal/gatewayapi"
 	"github.com/projectcontour/contour/internal/timeout"
 )
 
@@ -139,6 +140,9 @@ func headersPolicyService(defaultPolicy *HeadersPolicy, policy *contour_v1.Heade
 				if HostRewriteHeader := extractHostRewriteHeaderValue(v); HostRewriteHeader != "" {
 					return nil, fmt.Errorf("rewriting %q host header with dynamic value is not supported on service", key)
 				}
+				if err := validateHostRewrite(v); err != nil {
+					return nil, fmt.Errorf("invalid set header %q: %v", key, err)
+				}
 				userPolicy.HostRewrite = v
 			}
 			continue
@@ -192,6 +196,9 @@ func headersPolicyRoute(policy *contour_v1.HeadersPolicy, allowHostRewrite bool,
 			if extractedHostRewriteHeader := extractHostRewriteHeaderValue(entry.Value); extractedHostRewriteHeader != "" {
 				hostRewriteHeader = http.CanonicalHeaderKey(extractedHostRewriteHeader)
 				continue
+			}
+			if err := validateHostRewrite(entry.Value); err != nil {
+				return nil, fmt.Errorf("invalid set header %q: %v", key, err)
 			}
 			hostRewrite = entry.Value
 			continue
@@ -251,6 +258,16 @@ func validateHeaderValue(value string) error {
 	return nil
 }
 
+// validateHostRewrite returns an error if host is not a bare DNS name that can
+// be used as a literal Host header rewrite.
+func validateHostRewrite(host string) error {
+	if strings.Contains(host, "*") {
+		return fmt.Errorf("invalid hostname %q: wildcards are not allowed", host)
+	}
+
+	return gatewayapi.IsValidHostname(host)
+}
+
 // headersPolicyGatewayAPI builds a *HeaderPolicy for the supplied HTTPHeaderFilter.
 // TODO: Take care about the order of operators once https://github.com/kubernetes-sigs/gateway-api/issues/480 was solved.
 func headersPolicyGatewayAPI(hf *gatewayapi_v1.HTTPHeaderFilter, headerPolicyType string) (*HeadersPolicy, error) {
@@ -275,6 +292,10 @@ func headersPolicyGatewayAPI(hf *gatewayapi_v1.HTTPHeaderFilter, headerPolicyTyp
 			}
 			if key == "Host" && (headerPolicyType == string(gatewayapi_v1.HTTPRouteFilterRequestHeaderModifier) ||
 				headerPolicyType == string(gatewayapi_v1.GRPCRouteFilterRequestHeaderModifier)) {
+				if err := validateHostRewrite(header.Value); err != nil {
+					errlist = append(errlist, fmt.Errorf("invalid %s header %q: %v", op, key, err))
+					continue
+				}
 				hostRewrite = header.Value
 				continue
 			}

@@ -368,6 +368,20 @@ func TestHeadersPolicy(t *testing.T) {
 		want    HeadersPolicy
 		wantErr bool
 	}{
+		"invalid Host header rewrite in default policy": {
+			hp: &contour_v1.HeadersPolicy{
+				Set: []contour_v1.HeaderValue{{
+					Name:  "K-Foo",
+					Value: "foo",
+				}},
+			},
+			dhp: HeadersPolicy{
+				Set: map[string]string{
+					"Host": "bad_host",
+				},
+			},
+			wantErr: true,
+		},
 		"no percentage unchanged": {
 			hp: &contour_v1.HeadersPolicy{
 				Set: []contour_v1.HeaderValue{{
@@ -1454,6 +1468,53 @@ func TestExtractHeaderValue(t *testing.T) {
 	}
 }
 
+func TestValidateHostRewrite(t *testing.T) {
+	const invalidDNSName = `[a lowercase RFC 1123 subdomain must consist of lower case alphanumeric characters, '-' or '.', and must start and end with an alphanumeric character (e.g. 'example.com', regex used for validation is '[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*')]`
+
+	tests := map[string]struct {
+		host    string
+		wantErr string
+	}{
+		"valid DNS name":     {host: "example.com"},
+		"valid single label": {host: "backend"},
+		"IP address": {
+			host:    "10.0.0.1",
+			wantErr: `invalid hostname "10.0.0.1": must be a DNS name, not an IP address`,
+		},
+		"wildcard": {
+			host:    "*.example.com",
+			wantErr: `invalid hostname "*.example.com": wildcards are not allowed`,
+		},
+		"uppercase": {
+			host:    "Example.COM",
+			wantErr: fmt.Sprintf(`invalid hostname %q: %s`, "Example.COM", invalidDNSName),
+		},
+		"trailing dot": {
+			host:    "example.com.",
+			wantErr: fmt.Sprintf(`invalid hostname %q: %s`, "example.com.", invalidDNSName),
+		},
+		"port": {
+			host:    "example.com:8080",
+			wantErr: fmt.Sprintf(`invalid hostname %q: %s`, "example.com:8080", invalidDNSName),
+		},
+		"underscore": {
+			host:    "bad_host",
+			wantErr: fmt.Sprintf(`invalid hostname %q: %s`, "bad_host", invalidDNSName),
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			err := validateHostRewrite(tc.host)
+			if tc.wantErr != "" {
+				assert.EqualError(t, err, tc.wantErr)
+				return
+			}
+			assert.NoError(t, err)
+		})
+	}
+}
+
 func TestHeadersPolicyRoute(t *testing.T) {
 	tests := []struct {
 		name         string
@@ -1486,11 +1547,11 @@ func TestHeadersPolicyRoute(t *testing.T) {
 		{
 			name: "host rewrite allowed",
 			policy: &contour_v1.HeadersPolicy{
-				Set: []contour_v1.HeaderValue{{Name: "Host", Value: "Test"}},
+				Set: []contour_v1.HeaderValue{{Name: "Host", Value: "test.example.com"}},
 			},
 			allowRewrite: true,
 			expected: &HeadersPolicy{
-				HostRewrite: "Test",
+				HostRewrite: "test.example.com",
 				Remove:      nil,
 			},
 		},
@@ -1512,11 +1573,15 @@ func TestHeadersPolicyRoute(t *testing.T) {
 				Set: []contour_v1.HeaderValue{{Name: "Host", Value: "%REQ (Test"}},
 			},
 			allowRewrite: true,
-			expected: &HeadersPolicy{
-				HostRewrite:       "%REQ (Test",
-				HostRewriteHeader: "",
-				Remove:            nil,
+			expectedErr:  fmt.Errorf(`invalid set header "Host": invalid hostname %q: %s`, "%REQ (Test", `[a lowercase RFC 1123 subdomain must consist of lower case alphanumeric characters, '-' or '.', and must start and end with an alphanumeric character (e.g. 'example.com', regex used for validation is '[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*')]`),
+		},
+		{
+			name: "invalid literal host rewrite",
+			policy: &contour_v1.HeadersPolicy{
+				Set: []contour_v1.HeaderValue{{Name: "Host", Value: "bad_host"}},
 			},
+			allowRewrite: true,
+			expectedErr:  fmt.Errorf(`invalid set header "Host": invalid hostname %q: %s`, "bad_host", `[a lowercase RFC 1123 subdomain must consist of lower case alphanumeric characters, '-' or '.', and must start and end with an alphanumeric character (e.g. 'example.com', regex used for validation is '[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*')]`),
 		},
 		{
 			name: "invalid header name",
