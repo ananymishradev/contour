@@ -3060,6 +3060,40 @@ func TestDAGStatus(t *testing.T) {
 		},
 	})
 
+	invalidRequestHeadersPolicyHostnameRoute := &contour_v1.HTTPProxy{
+		ObjectMeta: meta_v1.ObjectMeta{
+			Name:      "invalidRHPHostnameRoute",
+			Namespace: fixture.ServiceRootsKuard.Namespace,
+		},
+		Spec: contour_v1.HTTPProxySpec{
+			VirtualHost: &contour_v1.VirtualHost{
+				Fqdn: "example.com",
+			},
+			Routes: []contour_v1.Route{{
+				Services: []contour_v1.Service{
+					{
+						Name: fixture.ServiceRootsKuard.Name,
+						Port: 8080,
+					},
+				},
+				RequestHeadersPolicy: &contour_v1.HeadersPolicy{
+					Set: []contour_v1.HeaderValue{{
+						Name:  "Host",
+						Value: "bad_host",
+					}},
+				},
+			}},
+		},
+	}
+
+	run(t, "requestHeadersPolicy, invalid Host header rewrite on Route", testcase{
+		objs: []any{invalidRequestHeadersPolicyHostnameRoute, fixture.ServiceRootsKuard},
+		want: map[types.NamespacedName]contour_v1.DetailedCondition{
+			{Name: invalidRequestHeadersPolicyHostnameRoute.Name, Namespace: invalidRequestHeadersPolicyHostnameRoute.Namespace}: fixture.NewValidCondition().
+				WithError(contour_v1.ConditionTypeRouteError, "RequestHeadersPolicyInvalid", `invalid set header "Host": invalid hostname "bad_host": [a lowercase RFC 1123 subdomain must consist of lower case alphanumeric characters, '-' or '.', and must start and end with an alphanumeric character (e.g. 'example.com', regex used for validation is '[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*')] on request headers`),
+		},
+	})
+
 	duplicateCookieRewritePolicyRoute := &contour_v1.HTTPProxy{
 		ObjectMeta: meta_v1.ObjectMeta{
 			Name:      "invalidCRPRoute",
@@ -8693,6 +8727,52 @@ func TestGatewayAPIHTTPRouteDAGStatus(t *testing.T) {
 		wantGatewayStatusUpdate: validGatewayStatusUpdate("http", gatewayapi_v1.HTTPProtocolType, 1),
 	})
 
+	run(t, "Invalid RequestHeaderModifier due to invalid Host header", testcase{
+		objs: []any{
+			kuardService,
+			&gatewayapi_v1.HTTPRoute{
+				ObjectMeta: meta_v1.ObjectMeta{
+					Name:      "basic",
+					Namespace: "default",
+				},
+				Spec: gatewayapi_v1.HTTPRouteSpec{
+					CommonRouteSpec: gatewayapi_v1.CommonRouteSpec{
+						ParentRefs: []gatewayapi_v1.ParentReference{gatewayapi.GatewayParentRef("projectcontour", "contour")},
+					},
+					Hostnames: []gatewayapi_v1.Hostname{
+						"test.projectcontour.io",
+					},
+					Rules: []gatewayapi_v1.HTTPRouteRule{{
+						Matches:     gatewayapi.HTTPRouteMatch(gatewayapi_v1.PathMatchPathPrefix, "/"),
+						BackendRefs: gatewayapi.HTTPBackendRef("kuard", 8080, 1),
+						Filters: []gatewayapi_v1.HTTPRouteFilter{{
+							Type: gatewayapi_v1.HTTPRouteFilterRequestHeaderModifier,
+							RequestHeaderModifier: &gatewayapi_v1.HTTPHeaderFilter{
+								Set: []gatewayapi_v1.HTTPHeader{
+									{Name: "Host", Value: "bad_host"},
+								},
+							},
+						}},
+					}},
+				},
+			},
+		},
+		wantRouteConditions: []*status.RouteStatusUpdate{{
+			FullName: types.NamespacedName{Namespace: "default", Name: "basic"},
+			RouteParentStatuses: []*gatewayapi_v1.RouteParentStatus{
+				{
+					ParentRef: gatewayapi.GatewayParentRef("projectcontour", "contour"),
+					Conditions: []meta_v1.Condition{
+						resolvedRefsFalse(status.ReasonDegraded, `invalid set header "Host": invalid hostname "bad_host": [a lowercase RFC 1123 subdomain must consist of lower case alphanumeric characters, '-' or '.', and must start and end with an alphanumeric character (e.g. 'example.com', regex used for validation is '[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*')] on request headers`),
+						routeAcceptedHTTPRouteCondition(),
+					},
+				},
+			},
+		}},
+		// Invalid filters still result in an attached route.
+		wantGatewayStatusUpdate: validGatewayStatusUpdate("http", gatewayapi_v1.HTTPProtocolType, 1),
+	})
+
 	run(t, "Invalid ResponseHeaderModifier due to duplicated headers", testcase{
 		objs: []any{
 			kuardService,
@@ -11165,6 +11245,54 @@ func TestGatewayAPIGRPCRouteDAGStatus(t *testing.T) {
 					ParentRef: gatewayapi.GatewayParentRef("projectcontour", "contour"),
 					Conditions: []meta_v1.Condition{
 						resolvedRefsFalse(status.ReasonDegraded, "duplicate header addition: \"Custom\" on request headers"),
+						routeAcceptedGRPCRouteCondition(),
+					},
+				},
+			},
+		}},
+		// Invalid filters still result in an attached route.
+		wantGatewayStatusUpdate: validGatewayStatusUpdate("http", gatewayapi_v1.HTTPProtocolType, 1),
+	})
+
+	run(t, "grpcroute: invalid RequestHeaderModifier due to invalid Host header", testcase{
+		objs: []any{
+			kuardService,
+			&gatewayapi_v1.GRPCRoute{
+				ObjectMeta: meta_v1.ObjectMeta{
+					Name:      "basic",
+					Namespace: "default",
+				},
+				Spec: gatewayapi_v1.GRPCRouteSpec{
+					CommonRouteSpec: gatewayapi_v1.CommonRouteSpec{
+						ParentRefs: []gatewayapi_v1.ParentReference{gatewayapi.GatewayParentRef("projectcontour", "contour")},
+					},
+					Hostnames: []gatewayapi_v1.Hostname{
+						"test.projectcontour.io",
+					},
+					Rules: []gatewayapi_v1.GRPCRouteRule{{
+						Matches: []gatewayapi_v1.GRPCRouteMatch{{
+							Method: gatewayapi.GRPCMethodMatch(gatewayapi_v1.GRPCMethodMatchExact, "com.example.service", "Login"),
+						}},
+						BackendRefs: gatewayapi.GRPCRouteBackendRef("kuard", 8080, 1),
+						Filters: []gatewayapi_v1.GRPCRouteFilter{{
+							Type: gatewayapi_v1.GRPCRouteFilterRequestHeaderModifier,
+							RequestHeaderModifier: &gatewayapi_v1.HTTPHeaderFilter{
+								Set: []gatewayapi_v1.HTTPHeader{
+									{Name: "Host", Value: "bad_host"},
+								},
+							},
+						}},
+					}},
+				},
+			},
+		},
+		wantRouteConditions: []*status.RouteStatusUpdate{{
+			FullName: types.NamespacedName{Namespace: "default", Name: "basic"},
+			RouteParentStatuses: []*gatewayapi_v1.RouteParentStatus{
+				{
+					ParentRef: gatewayapi.GatewayParentRef("projectcontour", "contour"),
+					Conditions: []meta_v1.Condition{
+						resolvedRefsFalse(status.ReasonDegraded, `invalid set header "Host": invalid hostname "bad_host": [a lowercase RFC 1123 subdomain must consist of lower case alphanumeric characters, '-' or '.', and must start and end with an alphanumeric character (e.g. 'example.com', regex used for validation is '[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*')] on request headers`),
 						routeAcceptedGRPCRouteCondition(),
 					},
 				},
