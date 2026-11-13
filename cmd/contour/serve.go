@@ -191,6 +191,7 @@ type Server struct {
 	coreClient        *kubernetes.Clientset
 	mgr               manager.Manager
 	registry          *prometheus.Registry
+	metrics           *metrics.Metrics
 	handlerCacheSyncs []cache.InformerSynced
 }
 
@@ -492,6 +493,7 @@ func (s *Server) doServe() error {
 	}
 
 	contourMetrics := metrics.NewMetrics(s.registry)
+	s.metrics = contourMetrics
 
 	// Endpoints updates are handled directly by the EndpointSliceTranslator due to the high update volume.
 	endpointHandler := xdscache_v3.NewEndpointSliceTranslator(s.log.WithField("context", "endpointslicetranslator"))
@@ -963,7 +965,7 @@ func (s *Server) setupMetrics(metricsConfig contour_v1alpha1.MetricsConfig, heal
 	}
 
 	if healthConfig.Address == metricsConfig.Address && healthConfig.Port == metricsConfig.Port {
-		h := health.Handler(s.coreClient)
+		h := health.Handler(s.coreClient, s.metrics)
 		metricsvc.Handle("/health", h)
 		metricsvc.Handle("/healthz", h)
 	}
@@ -981,7 +983,7 @@ func (s *Server) setupHealth(healthConfig contour_v1alpha1.HealthConfig,
 			FieldLogger: s.log.WithField("context", "healthsvc"),
 		}
 
-		h := health.Handler(s.coreClient)
+		h := health.Handler(s.coreClient, s.metrics)
 		healthsvc.Handle("/health", h)
 		healthsvc.Handle("/healthz", h)
 
